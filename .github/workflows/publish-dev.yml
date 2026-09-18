@@ -1,0 +1,83 @@
+name: Publish DEV article
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish immediately? false = save as draft"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare article body
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path("content/ARTICLE_DEVTO_PTBR.md")
+          text = p.read_text(encoding="utf-8")
+
+          if text.startswith("---\n"):
+              end = text.find("\n---\n", 4)
+              if end != -1:
+                  text = text[end + 5:]
+
+          text = text.replace(
+              "[ADICIONAR_URL_DO_GITHUB_APÓS_PUBLICAÇÃO]",
+              "https://github.com/werisonkusanagi-collab/safe-ai-coding-governance-starter-ptbr",
+          )
+
+          Path("/tmp/dev-article.md").write_text(
+              text.strip() + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Create DEV article
+        env:
+          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
+          PUBLISH_NOW: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          python - <<'PY' > /tmp/payload.json
+          import json
+          import os
+          from pathlib import Path
+
+          body = Path("/tmp/dev-article.md").read_text(encoding="utf-8")
+
+          payload = {
+              "article": {
+                  "title": "Como impedir que um agente de programação faça mudanças destrutivas sem aprovação humana",
+                  "body_markdown": body,
+                  "published": os.environ["PUBLISH_NOW"].lower() == "true",
+                  "description": "Uma estrutura mínima de autoridade, gates humanos, rollback e evidência para projetos com agentes de programação.",
+                  "tags": "ai,programming,agents,safety"
+              }
+          }
+
+          print(json.dumps(payload, ensure_ascii=False))
+          PY
+
+          curl --fail-with-body \
+            --request POST \
+            --url https://dev.to/api/articles \
+            --header "api-key: ${DEVTO_API_KEY}" \
+            --header "accept: application/vnd.forem.api-v1+json" \
+            --header "content-type: application/json" \
+            --data-binary @/tmp/payload.json
